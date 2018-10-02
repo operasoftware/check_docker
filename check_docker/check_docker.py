@@ -321,8 +321,12 @@ def get_ps_name(name_list):
         raise NameError("Error when trying to identify 'ps' name in {}".format(name_list))
 
 
-def get_containers(names, require_present):
-    containers_list, _ = get_url(daemon + '/containers/json?all=1')
+def get_containers(names, require_present, running_only=False):
+    if running_only:
+        suffix = ''
+    else:
+        suffix = '?all=1'
+    containers_list, _ = get_url(daemon + '/containers/json' + suffix)
 
     all_container_names = set(get_ps_name(x['Names']) for x in containers_list)
 
@@ -882,7 +886,9 @@ def perform_checks(raw_args):
 
     # Here is where all the work happens
     #############################################################################################
-    containers = get_containers(args.containers, args.present)
+    containers = get_containers(
+        args.containers, args.present, running_only=(args.status == 'running')
+    )
 
     if len(containers) == 0 and not args.present:
         unknown("No containers names found matching criteria")
