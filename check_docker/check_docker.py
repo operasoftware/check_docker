@@ -441,8 +441,9 @@ def multithread_execution(disable_threading=DISABLE_THREADING):
             if DISABLE_THREADING:
                 func(container, *args, **kwargs)
             else:
-                threads.append(parallel_executor.submit(func, container, *args, **kwargs))
-
+                future = parallel_executor.submit(func, container, *args, **kwargs)
+                threads.append(future)
+                return future
         return wrapper
 
     return inner_decorator
@@ -532,19 +533,16 @@ def check_status(container, desired_state):
     state = get_state(container)
     # On new docker engines the status holds whatever the current state is, running, stopped, paused, etc.
     if "Status" in state:
-        if normized_desired_state != get_state(container)['Status']:
-            critical("{} state is not {}".format(container, desired_state))
-            return
+        if normized_desired_state == get_state(container)['Status']:
+            return True
     else:  # Assume we are checking an older docker which only uses keys and true false values to indicate state
         leading_cap_state_name = normized_desired_state.title()
         if leading_cap_state_name in state:
-            if not state[leading_cap_state_name]:
-                critical("{} state is not {}".format(container, leading_cap_state_name))
-                return
+            if state[leading_cap_state_name]:
+                return True
         else:
             unknown("For {} cannot find a value for {} in state".format(container, desired_state))
-    ok("{} status is {}".format(container, desired_state))
-
+    return False
 
 @multithread_execution()
 @require_running('health')
@@ -894,21 +892,20 @@ def perform_checks(raw_args):
         unknown("No containers names found matching criteria")
         return
 
+    found_status = not args.status
+    statuses = {}
+
     for container in containers:
 
         # Check status
         if args.status:
-            check_status(container, args.status)
+            statuses[check_status(container, args.status)] = container
 
         # Check version
         if args.version:
             check_version(container, args.insecure_registries)
 
         # below are checks that require a 'running' status
-
-        # Check status
-        if args.health:
-            check_health(container)
 
         # Check cpu usage
         if args.cpu:
@@ -926,6 +923,18 @@ def perform_checks(raw_args):
         if args.restarts:
             check_restarts(container, parse_thresholds(args.restarts, include_units=False))
 
+    for future in futures.as_completed(statuses):
+        if future.result():
+            found_status = statuses[future]
+
+    if not found_status:
+        critical("{} state is not {}".format(args.containers, args.status))
+
+    if args.status and found_status:
+        ok("{} status is {}".format(found_status, args.status))
+
+    if args.health and found_status:
+        check_health(found_status)
 
 def main():
     try:
