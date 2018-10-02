@@ -130,6 +130,40 @@ def get_services(names):
     return filtered
 
 
+def get_nodes(names):
+    nodes_list, status = get_url(daemon + '/nodes')
+    if status == 406:
+        critical("Error checking service status, node is not in swarm mode")
+        return []
+    elif status not in HTTP_GOOD_CODES:
+        unknown("Could not retrieve service info")
+        return []
+
+    all_nodes_names = set(x['Description']['Hostname'] for x in nodes_list)
+    nodes = {x['Description']['Hostname']: x for x in nodes_list}
+    if 'all' in names:
+        return all_nodes_names
+
+    filtered = set()
+    for matcher in names:
+        found = False
+        for candidate in all_nodes_names:
+            if re.match("^{}$".format(matcher), candidate):
+                filtered.add(candidate)
+                status = nodes[candidate]['Spec']['Availability']
+                if status != 'active':
+                    critical("Node {} is {}, not active.".format(
+                        candidate, status
+                    ))
+                found = True
+        # If we don't find a service that matches out regex
+        if not found:
+            critical("No nodes match {}".format(matcher))
+
+    return filtered
+
+
+
 def set_rc(new_rc):
     global rc
     rc = new_rc if new_rc > rc else rc
@@ -224,6 +258,15 @@ def process_args(args):
                              default=[],
                              help='One or more RegEx that match the names of the services(s) to check.')
 
+    # Node
+    swarm_group.add_argument('--node',
+                             dest='node',
+                             action='store',
+                             type=str,
+                             nargs='+',
+                             default=[],
+                             help='One or more node name to check.')
+
     parser.add_argument('-V', action='version', version='%(prog)s {}'.format(__version__))
 
     if len(args) == 0:
@@ -280,6 +323,14 @@ def perform_checks(raw_args):
                 if len(services) > 0:  # Status is set to critical by get_services() if nothing is found for a name
                     for service in services:
                         check_service(service)
+
+            if args.node:
+                nodes = get_nodes(args.node)
+
+                if len(nodes) > 0:
+                    ok("{}/{} nodes are active.".format(
+                        len(nodes), len(args.node)
+                    ))
 
         except Exception as e:
             unknown("Exception raised during check: {}".format(repr(e)))
