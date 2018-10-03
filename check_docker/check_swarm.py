@@ -312,6 +312,24 @@ def print_results():
 
 def perform_checks(raw_args):
     args = process_args(raw_args)
+
+    if os.path.isfile('/usr/local/etc/check_swarm.json'):
+        with open('/usr/local/etc/check_swarm.json', 'r') as config_file:
+            json_config = json.load(config_file)
+        if not json_config.get('is_manager'):
+            ok("This node is not a manager.")
+            print_results()
+            return
+
+        if json_config.get('services'):
+            args.service = json_config['services']
+
+        if json_config.get('nodes'):
+            args.node = json_config['nodes']
+
+        args.swarm = True
+
+
     if socketfile_permissions_failure(args):
         unknown("Cannot access docker socket file. User ID={}, socket file={}".format(os.getuid(), args.connection))
     else:
