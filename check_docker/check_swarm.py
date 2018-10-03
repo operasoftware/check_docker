@@ -169,10 +169,11 @@ def set_rc(new_rc):
     rc = new_rc if new_rc > rc else rc
 
 
-def ok(message):
+def ok(message, quiet=False):
     set_rc(OK_RC)
-    messages.append('OK: ' + message)
-
+    if not quiet:
+        messages.append('OK: ' + message)
+    return True
 
 def warning(message):
     set_rc(WARNING_RC)
@@ -193,19 +194,21 @@ def unknown(message):
 #############################################################################################
 def check_swarm():
     status = get_swarm_status()
-    process_url_status(status, ok_msg='Node is in a swarm',
-                       critical_msg='Node is not in a swarm', unknown_msg='Error accessing swarm info')
+    process_url_status(status, ok_msg='Node is a manager',
+                       critical_msg='Node is not a manager', unknown_msg='Error accessing swarm info')
 
 
-def check_service(name):
+def check_service(name, quiet=False):
     info, status = get_service_info(name)
-    process_url_status(status, ok_msg='Service {service} is up and running'.format(service=name),
-                       critical_msg='Service {service} was not found on the swarm'.format(service=name))
+    return process_url_status(status,
+                              quiet=quiet,
+                              ok_msg='Service {service} is up and running'.format(service=name),
+                              critical_msg='Service {service} was not found on the swarm'.format(service=name))
 
 
-def process_url_status(status, ok_msg=None, critical_msg=None, unknown_msg=None):
+def process_url_status(status, quiet=False, ok_msg=None, critical_msg=None, unknown_msg=None):
     if status in HTTP_GOOD_CODES:
-        return ok(ok_msg)
+        return ok(ok_msg, quiet=quiet)
     elif status in [503, 404, 406]:
         return critical(critical_msg)
     else:
@@ -317,12 +320,20 @@ def perform_checks(raw_args):
         try:
             if args.swarm:
                 check_swarm()
-            elif args.service:
+
+            if args.service:
                 services = get_services(args.service)
 
-                if len(services) > 0:  # Status is set to critical by get_services() if nothing is found for a name
-                    for service in services:
-                        check_service(service)
+                correct_states = []
+
+                for service in services:
+                    if check_service(service, quiet=True):
+                        correct_states += [service]
+
+                if len(correct_states):
+                    ok("{}/{} services are in correct state.".format(
+                        len(correct_states), len(args.service)
+                    ))
 
             if args.node:
                 nodes = get_nodes(args.node)
